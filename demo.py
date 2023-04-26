@@ -94,7 +94,7 @@ def export_embedding_model():
                 f,
                 export_params=True,
                 verbose=False,
-                opset_version=17,
+                opset_version=13,
                 do_constant_folding=True,
                 input_names=list(dummy_inputs.keys()),
                 output_names=output_names,
@@ -139,7 +139,7 @@ def export_sam_model():
                 f,
                 export_params=True,
                 verbose=False,
-                opset_version=17,
+                opset_version=13,
                 do_constant_folding=True,
                 input_names=list(dummy_inputs.keys()),
                 output_names=output_names,
@@ -218,7 +218,7 @@ def export_engine_image_encoder(f='vit_l_embedding.onnx'):
     logger = trt.Logger(trt.Logger.INFO)
     builder = trt.Builder(logger)
     config = builder.create_builder_config()
-    workspace = 10
+    workspace = 6
     print("workspace: ", workspace)
     config.max_workspace_size = workspace * 1 << 30
     flag = (1 << int(trt.NetworkDefinitionCreationFlag.EXPLICIT_BATCH))
@@ -234,7 +234,7 @@ def export_engine_image_encoder(f='vit_l_embedding.onnx'):
     for out in outputs:
         print(f'output "{out.name}" with shape{out.shape} {out.dtype}')
 
-    half = False
+    half = True
     print(f'building FP{16 if builder.platform_has_fast_fp16 and half else 32} engine as {f}')
     if builder.platform_has_fast_fp16 and half:
         config.set_flag(trt.BuilderFlag.FP16)
@@ -277,7 +277,7 @@ def export_engine_prompt_encoder_and_mask_decoder(f='sam_onnx_example.onnx'):
     # profile.set_shape_input('orig_im_size', (2,), (2,), (2, ))
     config.add_optimization_profile(profile)
 
-    half = False
+    half = True
     print(f'building FP{16 if builder.platform_has_fast_fp16 and half else 32} engine as {f}')
     if builder.platform_has_fast_fp16 and half:
         config.set_flag(trt.BuilderFlag.FP16)
@@ -289,3 +289,5 @@ if __name__ == '__main__':
         export_embedding_model()
         export_sam_model()
         onnx_model_example()
+        export_engine_image_encoder()
+        export_engine_prompt_encoder_and_mask_decoder()
