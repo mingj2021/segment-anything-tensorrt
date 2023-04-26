@@ -1,20 +1,3 @@
-## build with docker
-```
-docker build -t dev:ml -f ./Dockerfile.dev .
-```
-## how to transform into engine model
-```
-docker run -it --rm -gpu all dev:ml
-git clone https://github.com/facebookresearch/segment-anything.git
-cd segment-anything
-mkdir weights && cd weights
-wget https://dl.fbaipublicfiles.com/segment_anything/sam_vit_l_0b3195.pth
-cd ../
-touch demo.py
-vim demo.py
-```
-### definition && import dependencies
-```
 import torch
 import torch.nn as nn
 from torch.nn import functional as F
@@ -30,6 +13,27 @@ import os
 os.environ["KMP_DUPLICATE_LIB_OK"]  =  "TRUE"
 import onnxruntime
 
+def show_mask(mask, ax, random_color=False):
+    if random_color:
+        color = np.concatenate([np.random.random(3), np.array([0.6])], axis=0)
+    else:
+        color = np.array([30/255, 144/255, 255/255, 0.6])
+    h, w = mask.shape[-2:]
+    mask_image = mask.reshape(h, w, 1) * color.reshape(1, 1, -1)
+    ax.imshow(mask_image)
+    
+def show_points(coords, labels, ax, marker_size=375):
+    pos_points = coords[labels==1]
+    neg_points = coords[labels==0]
+    ax.scatter(pos_points[:, 0], pos_points[:, 1], color='green', marker='*', s=marker_size, edgecolor='white', linewidth=1.25)
+    ax.scatter(neg_points[:, 0], neg_points[:, 1], color='red', marker='*', s=marker_size, edgecolor='white', linewidth=1.25)   
+    
+def show_box(box, ax):
+    x0, y0 = box[0], box[1]
+    w, h = box[2] - box[0], box[3] - box[1]
+    ax.add_patch(plt.Rectangle((x0, y0), w, h, edgecolor='green', facecolor=(0,0,0,0), lw=2))  
+
+
 def get_preprocess_shape(oldh: int, oldw: int, long_side_length: int) -> Tuple[int, int]:
     """
     Compute the output size given input size and target long side length.
@@ -43,8 +47,7 @@ def get_preprocess_shape(oldh: int, oldw: int, long_side_length: int) -> Tuple[i
 # @torch.no_grad()
 def pre_processing(image: np.ndarray, target_length: int, device,pixel_mean,pixel_std,img_size):
     target_size = get_preprocess_shape(image.shape[0], image.shape[1], target_length)
-    input_image = cv2.resize(image,target_size)
-    # input_image = np.array(resize(to_pil_image(image), target_size))
+    input_image = np.array(resize(to_pil_image(image), target_size))
     input_image_torch = torch.as_tensor(input_image, device=device)
     input_image_torch = input_image_torch.permute(2, 0, 1).contiguous()[None, :, :, :]
 
@@ -57,10 +60,7 @@ def pre_processing(image: np.ndarray, target_length: int, device,pixel_mean,pixe
     padw = img_size - w
     input_image_torch = F.pad(input_image_torch, (0, padw, 0, padh))
     return input_image_torch
-    
-```
-### export embedding-onnx model
-```
+
 def export_embedding_model():
     sam_checkpoint = "weights/sam_vit_l_0b3195.pth"
     model_type = "vit_l"
@@ -84,69 +84,23 @@ def export_embedding_model():
     output_names = ["image_embeddings"]
     image_embeddings = sam.image_encoder(inputs).cpu().numpy()
     print('image_embeddings', image_embeddings.shape)
-    # with warnings.catch_warnings():
-        # warnings.filterwarnings("ignore", category=torch.jit.TracerWarning)
-        # warnings.filterwarnings("ignore", category=UserWarning)
-    with open(onnx_model_path, "wb") as f:
-        torch.onnx.export(
-            sam.image_encoder,
-            tuple(dummy_inputs.values()),
-            f,
-            export_params=True,
-            verbose=False,
-            opset_version=12,
-            do_constant_folding=True,
-            input_names=list(dummy_inputs.keys()),
-            output_names=output_names,
-            # dynamic_axes=dynamic_axes,
-        ) 
-with torch.no_grad():
-    export_embedding_model()
-```
-### export prompt-encoder-mask-decoer-onnx model
-change "forward" function in the file which is "segment_anything/utils/onnx.py",as follows:
-```
-    def forward(
-        self,
-        image_embeddings: torch.Tensor,
-        point_coords: torch.Tensor,
-        point_labels: torch.Tensor,
-        mask_input: torch.Tensor,
-        has_mask_input: torch.Tensor
-        # orig_im_size: torch.Tensor,
-    ):
-        sparse_embedding = self._embed_points(point_coords, point_labels)
-        dense_embedding = self._embed_masks(mask_input, has_mask_input)
+    with warnings.catch_warnings():
+        warnings.filterwarnings("ignore", category=torch.jit.TracerWarning)
+        warnings.filterwarnings("ignore", category=UserWarning)
+        with open(onnx_model_path, "wb") as f:
+            torch.onnx.export(
+                sam.image_encoder,
+                tuple(dummy_inputs.values()),
+                f,
+                export_params=True,
+                verbose=False,
+                opset_version=17,
+                do_constant_folding=True,
+                input_names=list(dummy_inputs.keys()),
+                output_names=output_names,
+                # dynamic_axes=dynamic_axes,
+            )    
 
-        masks, scores = self.model.mask_decoder.predict_masks(
-            image_embeddings=image_embeddings,
-            image_pe=self.model.prompt_encoder.get_dense_pe(),
-            sparse_prompt_embeddings=sparse_embedding,
-            dense_prompt_embeddings=dense_embedding,
-        )
-
-        if self.use_stability_score:
-            scores = calculate_stability_score(
-                masks, self.model.mask_threshold, self.stability_score_offset
-            )
-
-        if self.return_single_mask:
-            masks, scores = self.select_masks(masks, scores, point_coords.shape[1])
-
-        return masks, scores
-        # upscaled_masks = self.mask_postprocessing(masks, orig_im_size)
-
-        # if self.return_extra_metrics:
-        #     stability_scores = calculate_stability_score(
-        #         upscaled_masks, self.model.mask_threshold, self.stability_score_offset
-        #     )
-        #     areas = (upscaled_masks > self.model.mask_threshold).sum(-1).sum(-1)
-        #     return upscaled_masks, scores, stability_scores, areas, masks
-
-        # return upscaled_masks, scores, masks
-```
-
-```
 def export_sam_model():
     from segment_anything.utils.onnx import SamOnnxModel
     checkpoint = "weights/sam_vit_l_0b3195.pth"
@@ -169,11 +123,11 @@ def export_sam_model():
         "point_coords": torch.randint(low=0, high=1024, size=(1, 5, 2), dtype=torch.float),
         "point_labels": torch.randint(low=0, high=4, size=(1, 5), dtype=torch.float),
         "mask_input": torch.randn(1, 1, *mask_input_size, dtype=torch.float),
-        "has_mask_input": torch.tensor([1], dtype=torch.float)
-        # "orig_im_size": torch.tensor([1500, 2250], dtype=torch.int32),
+        "has_mask_input": torch.tensor([1], dtype=torch.float),
+        # "orig_im_size": torch.tensor([1500, 2250], dtype=torch.float),
     }
     # output_names = ["masks", "iou_predictions", "low_res_masks"]
-    output_names = ["masks", "iou_predictions"]
+    output_names = ["masks", "scores"]
 
     with warnings.catch_warnings():
         warnings.filterwarnings("ignore", category=torch.jit.TracerWarning)
@@ -185,34 +139,12 @@ def export_sam_model():
                 f,
                 export_params=True,
                 verbose=False,
-                opset_version=12,
+                opset_version=17,
                 do_constant_folding=True,
                 input_names=list(dummy_inputs.keys()),
                 output_names=output_names,
                 dynamic_axes=dynamic_axes,
-            ) 
-            
-with torch.no_grad():
-    export_sam_model()
-```
-### test exported-onnx models
-```
-def show_mask(mask, ax):
-    color = np.array([30/255, 144/255, 255/255, 0.6])
-    h, w = mask.shape[-2:]
-    mask_image = mask.reshape(h, w, 1) * color.reshape(1, 1, -1)
-    ax.imshow(mask_image)
-    
-def show_points(coords, labels, ax, marker_size=375):
-    pos_points = coords[labels==1]
-    neg_points = coords[labels==0]
-    ax.scatter(pos_points[:, 0], pos_points[:, 1], color='green', marker='*', s=marker_size, edgecolor='white', linewidth=1.25)
-    ax.scatter(neg_points[:, 0], neg_points[:, 1], color='red', marker='*', s=marker_size, edgecolor='white', linewidth=1.25)   
-    
-def show_box(box, ax):
-    x0, y0 = box[0], box[1]
-    w, h = box[2] - box[0], box[3] - box[1]
-    ax.add_patch(plt.Rectangle((x0, y0), w, h, edgecolor='green', facecolor=(0,0,0,0), lw=2))
+            )  
 
 def onnx_model_example():
     import os
@@ -246,7 +178,6 @@ def onnx_model_example():
     from segment_anything.utils.transforms import ResizeLongestSide
     transf = ResizeLongestSide(image_size)
     onnx_coord = transf.apply_coords(onnx_coord, image.shape[:2]).astype(np.float32)
-    # print(onnx_coord)
     onnx_mask_input = np.zeros((1, 1, 256, 256), dtype=np.float32)
     onnx_has_mask_input = np.zeros(1, dtype=np.float32)
 
@@ -255,10 +186,12 @@ def onnx_model_example():
         "point_coords": onnx_coord,
         "point_labels": onnx_label,
         "mask_input": onnx_mask_input,
-        "has_mask_input": onnx_has_mask_input
+        "has_mask_input": onnx_has_mask_input,
+        # "orig_im_size": np.array(image.shape[:2], dtype=np.float32)
     }
 
-    masks, scores = ort_session_sam.run(None, ort_inputs)
+    masks, _ = ort_session_sam.run(None, ort_inputs)
+
     from segment_anything.utils.onnx import SamOnnxModel
     checkpoint = "weights/sam_vit_l_0b3195.pth"
     model_type = "vit_l"
@@ -267,7 +200,6 @@ def onnx_model_example():
 
     onnx_model = SamOnnxModel(sam, return_single_mask=True)
     masks = onnx_model.mask_postprocessing(torch.as_tensor(masks), torch.as_tensor(image.shape[:2]))
-    
     masks = masks > 0.0
     plt.figure(figsize=(10, 10))
     plt.imshow(image)
@@ -275,14 +207,9 @@ def onnx_model_example():
     # show_box(input_box, plt.gca())
     show_points(input_point, input_label, plt.gca())
     plt.axis('off')
-    plt.show()
-    
-with torch.no_grad():
-    onnx_model_example()
-```
-## convert image-encoder-onnx to engine model
-```
-def export_engine_image_encoder(f):
+    plt.savefig('demo.png')
+
+def export_engine_image_encoder(f='vit_l_embedding.onnx'):
     import tensorrt as trt
     from pathlib import Path
     file = Path(f)
@@ -313,13 +240,9 @@ def export_engine_image_encoder(f):
         config.set_flag(trt.BuilderFlag.FP16)
     with builder.build_engine(network, config) as engine, open(f, 'wb') as t:
         t.write(engine.serialize())
-with torch.no_grad():
-    export_engine_image_encoder('vit_l_embedding.onnx')
-```
 
-## convert prompt-encoder-and-mask-decoder-onnx to engine model 
-```
-def export_engine_prompt_encoder_and_mask_decoder(f):
+
+def export_engine_prompt_encoder_and_mask_decoder(f='sam_onnx_example.onnx'):
     import tensorrt as trt
     from pathlib import Path
     file = Path(f)
@@ -360,6 +283,9 @@ def export_engine_prompt_encoder_and_mask_decoder(f):
         config.set_flag(trt.BuilderFlag.FP16)
     with builder.build_engine(network, config) as engine, open(f, 'wb') as t:
         t.write(engine.serialize())
-with torch.no_grad():
-    export_engine_image_encoder('sam_onnx_example.onnx')
-```
+
+if __name__ == '__main__':
+    with torch.no_grad():
+        export_embedding_model()
+        export_sam_model()
+        onnx_model_example()
