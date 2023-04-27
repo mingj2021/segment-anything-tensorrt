@@ -1,7 +1,7 @@
 #include "buffers.h"
 #include <opencv2/opencv.hpp>
 #include <algorithm>
-#include <torchvision/vision.h>
+// #include <torchvision/vision.h>
 #include <torch/script.h>
 
 using namespace torch::indexing;
@@ -117,7 +117,7 @@ at::Tensor ResizeLongestSide::apply_coords(at::Tensor coords, at::IntArrayRef sz
 class SamEmbedding
 {
 public:
-    SamEmbedding(std::string &bufferName, std::shared_ptr<nvinfer1::ICudaEngine> &engine, cv::Mat im, int width = 640, int height = 640);
+    SamEmbedding(const std::string &bufferName, std::shared_ptr<nvinfer1::ICudaEngine> &engine, cv::Mat im, int width = 640, int height = 640);
     ~SamEmbedding();
 
     int prepareInput();
@@ -142,7 +142,7 @@ public:
     std::string mBufferName;
 };
 
-SamEmbedding::SamEmbedding(std::string &bufferName, std::shared_ptr<nvinfer1::ICudaEngine> &engine, cv::Mat im, int width, int height) : mBufferName(bufferName), mEngine(engine), frame(im), inp_width(width), inp_height(height)
+SamEmbedding::SamEmbedding(const std::string &bufferName, std::shared_ptr<nvinfer1::ICudaEngine> &engine, cv::Mat im, int width, int height) : mBufferName(bufferName), mEngine(engine), frame(im), inp_width(width), inp_height(height)
 {
     context = std::unique_ptr<nvinfer1::IExecutionContext>(mEngine->createExecutionContext());
     if (!context)
@@ -246,7 +246,7 @@ int SamEmbedding::verifyOutput()
 class SamPromptEncoderAndMaskDecoder
 {
 public:
-    SamPromptEncoderAndMaskDecoder(std::string &bufferName, std::shared_ptr<nvinfer1::ICudaEngine> &engine, cv::Mat im, int width = 640, int height = 640);
+    SamPromptEncoderAndMaskDecoder(const std::string &bufferName, std::shared_ptr<nvinfer1::ICudaEngine> &engine, cv::Mat im, int width = 640, int height = 640);
     ~SamPromptEncoderAndMaskDecoder();
 
     int prepareInput(int x, int y);
@@ -278,7 +278,7 @@ public:
     std::string mBufferName;
 };
 
-SamPromptEncoderAndMaskDecoder::SamPromptEncoderAndMaskDecoder(std::string &bufferName, std::shared_ptr<nvinfer1::ICudaEngine> &engine, cv::Mat im, int width, int height) : mBufferName(bufferName), mEngine(engine), frame(im), inp_width(width), inp_height(height)
+SamPromptEncoderAndMaskDecoder::SamPromptEncoderAndMaskDecoder(const std::string &bufferName, std::shared_ptr<nvinfer1::ICudaEngine> &engine, cv::Mat im, int width, int height) : mBufferName(bufferName), mEngine(engine), frame(im), inp_width(width), inp_height(height)
 {
     context = std::unique_ptr<nvinfer1::IExecutionContext>(mEngine->createExecutionContext());
     if (!context)

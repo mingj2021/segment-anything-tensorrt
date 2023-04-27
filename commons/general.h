@@ -12,6 +12,7 @@
 #include <numeric>
 #include <string>
 #include <vector>
+#include <sstream>
 
 namespace algorithms
 {

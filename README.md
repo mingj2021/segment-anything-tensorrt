@@ -1,19 +1,55 @@
-## build with docker
+# Overview
+[中文](README_zh_CN.md)
+
+The repository helps you quickly deploy segment-anything to real-world applications, such as auto annotation,etc.The original model is divided into two submodels, one for embedding and the other for prompting and mask decoder.
+# Table of Contents
+- [Overview](#Overview)
+- [Table of Contents](#Table-of-Contents)
+- [Getting Started](#getting-started)
+  - [Quick Start: Windows](#quick-start-windows)
+  - [Quick Start: Ubuntu](#quick-start-ubuntu)
+  - [Onnx Export](#onnx-export)
+    - [Image Encoder](#export-embedding-onnx-model)
+    - [Prompt Encoder and mask decoder](#export-prompt-encoder-mask-decoer-onnx-model)
+    - [Test Exported-onnx models](#test-exported-onnx-models)
+  - [Engine Export](#engine-export)
+    - [Image Encoder](#convert-image-encoder-onnx-to-engine-model)
+    - [Prompt Encoder and mask decoder](#convert-prompt-encoder-and-mask-decoder-onnx-to-engine-model)
+  - [Quantification]()
+  - [TensorRT Inferring]()
+    - [Preprocess]()
+    - [Postprocess]()
+    - [build]()
+- [Examples]()
+
+# Getting Started
+Prerequisites:
+- OpenCV
+- Libtorch
+- Torchvision
+- Tensorrt
+## Quick Start: Windows
 ```
+```
+
+## Quick Start: Ubuntu
+```
+# create virtual env
+git clone https://github.com/mingj2021/segment-anything-tensorrt.git
+cd segment-anything-tensorrt
 docker build -t dev:ml -f ./Dockerfile.dev .
-```
-## how to transform into engine model
-```
-docker run -it --rm -gpu all dev:ml
 git clone https://github.com/facebookresearch/segment-anything.git
 cd segment-anything
 mkdir weights && cd weights
 wget https://dl.fbaipublicfiles.com/segment_anything/sam_vit_l_0b3195.pth
-cd ../
-touch demo.py
-vim demo.py
+cd ../ 
+sudo mv ../demo.py .
+# run container
+docker run -it --rm --gpus all -v $(yourdirs)/segment-anything-tensorrt:/workspace/segment-anything-tensorrt dev:ml
 ```
-### definition && import dependencies
+
+# Onnx Export
+definition && import dependencies
 ```
 import torch
 import torch.nn as nn
@@ -43,8 +79,7 @@ def get_preprocess_shape(oldh: int, oldw: int, long_side_length: int) -> Tuple[i
 # @torch.no_grad()
 def pre_processing(image: np.ndarray, target_length: int, device,pixel_mean,pixel_std,img_size):
     target_size = get_preprocess_shape(image.shape[0], image.shape[1], target_length)
-    input_image = cv2.resize(image,target_size)
-    # input_image = np.array(resize(to_pil_image(image), target_size))
+    input_image = np.array(resize(to_pil_image(image), target_size))
     input_image_torch = torch.as_tensor(input_image, device=device)
     input_image_torch = input_image_torch.permute(2, 0, 1).contiguous()[None, :, :, :]
 
@@ -59,7 +94,7 @@ def pre_processing(image: np.ndarray, target_length: int, device,pixel_mean,pixe
     return input_image_torch
     
 ```
-### export embedding-onnx model
+## export embedding-onnx model
 ```
 def export_embedding_model():
     sam_checkpoint = "weights/sam_vit_l_0b3195.pth"
@@ -84,26 +119,26 @@ def export_embedding_model():
     output_names = ["image_embeddings"]
     image_embeddings = sam.image_encoder(inputs).cpu().numpy()
     print('image_embeddings', image_embeddings.shape)
-    # with warnings.catch_warnings():
-        # warnings.filterwarnings("ignore", category=torch.jit.TracerWarning)
-        # warnings.filterwarnings("ignore", category=UserWarning)
-    with open(onnx_model_path, "wb") as f:
-        torch.onnx.export(
-            sam.image_encoder,
-            tuple(dummy_inputs.values()),
-            f,
-            export_params=True,
-            verbose=False,
-            opset_version=12,
-            do_constant_folding=True,
-            input_names=list(dummy_inputs.keys()),
-            output_names=output_names,
-            # dynamic_axes=dynamic_axes,
-        ) 
+    with warnings.catch_warnings():
+        warnings.filterwarnings("ignore", category=torch.jit.TracerWarning)
+        warnings.filterwarnings("ignore", category=UserWarning)
+        with open(onnx_model_path, "wb") as f:
+            torch.onnx.export(
+                sam.image_encoder,
+                tuple(dummy_inputs.values()),
+                f,
+                export_params=True,
+                verbose=False,
+                opset_version=13,
+                do_constant_folding=True,
+                input_names=list(dummy_inputs.keys()),
+                output_names=output_names,
+                # dynamic_axes=dynamic_axes,
+            )   
 with torch.no_grad():
     export_embedding_model()
 ```
-### export prompt-encoder-mask-decoer-onnx model
+## export prompt-encoder-mask-decoer-onnx model
 change "forward" function in the file which is "segment_anything/utils/onnx.py",as follows:
 ```
     def forward(
@@ -169,11 +204,11 @@ def export_sam_model():
         "point_coords": torch.randint(low=0, high=1024, size=(1, 5, 2), dtype=torch.float),
         "point_labels": torch.randint(low=0, high=4, size=(1, 5), dtype=torch.float),
         "mask_input": torch.randn(1, 1, *mask_input_size, dtype=torch.float),
-        "has_mask_input": torch.tensor([1], dtype=torch.float)
-        # "orig_im_size": torch.tensor([1500, 2250], dtype=torch.int32),
+        "has_mask_input": torch.tensor([1], dtype=torch.float),
+        # "orig_im_size": torch.tensor([1500, 2250], dtype=torch.float),
     }
     # output_names = ["masks", "iou_predictions", "low_res_masks"]
-    output_names = ["masks", "iou_predictions"]
+    output_names = ["masks", "scores"]
 
     with warnings.catch_warnings():
         warnings.filterwarnings("ignore", category=torch.jit.TracerWarning)
@@ -185,17 +220,17 @@ def export_sam_model():
                 f,
                 export_params=True,
                 verbose=False,
-                opset_version=12,
+                opset_version=13,
                 do_constant_folding=True,
                 input_names=list(dummy_inputs.keys()),
                 output_names=output_names,
                 dynamic_axes=dynamic_axes,
-            ) 
+            )  
             
 with torch.no_grad():
     export_sam_model()
 ```
-### test exported-onnx models
+## test exported-onnx models
 ```
 def show_mask(mask, ax):
     color = np.array([30/255, 144/255, 255/255, 0.6])
@@ -246,7 +281,6 @@ def onnx_model_example():
     from segment_anything.utils.transforms import ResizeLongestSide
     transf = ResizeLongestSide(image_size)
     onnx_coord = transf.apply_coords(onnx_coord, image.shape[:2]).astype(np.float32)
-    # print(onnx_coord)
     onnx_mask_input = np.zeros((1, 1, 256, 256), dtype=np.float32)
     onnx_has_mask_input = np.zeros(1, dtype=np.float32)
 
@@ -255,10 +289,12 @@ def onnx_model_example():
         "point_coords": onnx_coord,
         "point_labels": onnx_label,
         "mask_input": onnx_mask_input,
-        "has_mask_input": onnx_has_mask_input
+        "has_mask_input": onnx_has_mask_input,
+        # "orig_im_size": np.array(image.shape[:2], dtype=np.float32)
     }
 
-    masks, scores = ort_session_sam.run(None, ort_inputs)
+    masks, _ = ort_session_sam.run(None, ort_inputs)
+
     from segment_anything.utils.onnx import SamOnnxModel
     checkpoint = "weights/sam_vit_l_0b3195.pth"
     model_type = "vit_l"
@@ -267,7 +303,6 @@ def onnx_model_example():
 
     onnx_model = SamOnnxModel(sam, return_single_mask=True)
     masks = onnx_model.mask_postprocessing(torch.as_tensor(masks), torch.as_tensor(image.shape[:2]))
-    
     masks = masks > 0.0
     plt.figure(figsize=(10, 10))
     plt.imshow(image)
@@ -275,14 +310,15 @@ def onnx_model_example():
     # show_box(input_box, plt.gca())
     show_points(input_point, input_label, plt.gca())
     plt.axis('off')
-    plt.show()
+    plt.savefig('demo.png')
     
 with torch.no_grad():
     onnx_model_example()
 ```
+# Engine Export
 ## convert image-encoder-onnx to engine model
 ```
-def export_engine_image_encoder(f):
+def export_engine_image_encoder(f='vit_l_embedding.onnx'):
     import tensorrt as trt
     from pathlib import Path
     file = Path(f)
@@ -291,7 +327,7 @@ def export_engine_image_encoder(f):
     logger = trt.Logger(trt.Logger.INFO)
     builder = trt.Builder(logger)
     config = builder.create_builder_config()
-    workspace = 10
+    workspace = 6
     print("workspace: ", workspace)
     config.max_workspace_size = workspace * 1 << 30
     flag = (1 << int(trt.NetworkDefinitionCreationFlag.EXPLICIT_BATCH))
@@ -307,7 +343,7 @@ def export_engine_image_encoder(f):
     for out in outputs:
         print(f'output "{out.name}" with shape{out.shape} {out.dtype}')
 
-    half = False
+    half = True
     print(f'building FP{16 if builder.platform_has_fast_fp16 and half else 32} engine as {f}')
     if builder.platform_has_fast_fp16 and half:
         config.set_flag(trt.BuilderFlag.FP16)
@@ -319,7 +355,7 @@ with torch.no_grad():
 
 ## convert prompt-encoder-and-mask-decoder-onnx to engine model 
 ```
-def export_engine_prompt_encoder_and_mask_decoder(f):
+def export_engine_prompt_encoder_and_mask_decoder(f='sam_onnx_example.onnx'):
     import tensorrt as trt
     from pathlib import Path
     file = Path(f)
@@ -354,7 +390,7 @@ def export_engine_prompt_encoder_and_mask_decoder(f):
     # profile.set_shape_input('orig_im_size', (2,), (2,), (2, ))
     config.add_optimization_profile(profile)
 
-    half = False
+    half = True
     print(f'building FP{16 if builder.platform_has_fast_fp16 and half else 32} engine as {f}')
     if builder.platform_has_fast_fp16 and half:
         config.set_flag(trt.BuilderFlag.FP16)
