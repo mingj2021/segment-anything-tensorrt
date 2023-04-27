@@ -1,5 +1,8 @@
 # Overview
 [中文](README_zh_CN.md)
+<p float="left">
+  <img src="truck.gif?raw=true" width="100%" />
+</p>
 
 The repository helps you quickly deploy segment-anything to real-world applications, such as auto annotation,etc.The original model is divided into two submodels, one for embedding and the other for prompting and mask decoder.
 # Table of Contents
@@ -24,12 +27,22 @@ The repository helps you quickly deploy segment-anything to real-world applicati
 
 # Getting Started
 Prerequisites:
-- OpenCV
-- Libtorch
-- Torchvision
-- Tensorrt
+- [OpenCV](https://github.com/opencv/opencv)
+- [Libtorch](https://pytorch.org/)
+- [Torchvision](https://github.com/pytorch/vision)
+- [Tensorrt](https://developer.nvidia.com/tensorrt)
 ## Quick Start: Windows
 ```
+# create conda virtual env
+conda create -n segment-anything  python=3.8
+# activate this environment
+conda activate segment-anything
+pip3 install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu117
+pip install opencv-python pycocotools matplotlib onnxruntime onnx
+# download TensorRT-8.5.1.7.Windows10.x86_64.cuda-x.x.zip && unzip
+pip install ./tensorrt-8.5.1.7-cp38-none-win_amd64.whl
+# tensorrt tool: PyTorch-Quantization 
+pip install pytorch-quantization --extra-index-url https://pypi.ngc.nvidia.com
 ```
 
 ## Quick Start: Ubuntu
