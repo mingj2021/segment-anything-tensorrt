@@ -12,6 +12,12 @@ import warnings
 import os
 os.environ["KMP_DUPLICATE_LIB_OK"]  =  "TRUE"
 import onnxruntime
+from onnxruntime.quantization import QuantType
+from onnxruntime.quantization.quantize import quantize_dynamic
+from pathlib import Path
+import tqdm
+import glob
+import tensorrt as trt
 
 def show_mask(mask, ax, random_color=False):
     if random_color:
@@ -80,7 +86,7 @@ def export_embedding_model():
     onnx_model_path = model_type+"_"+"embedding.onnx"
     dummy_inputs = {
     "images": inputs
-}
+ }
     output_names = ["image_embeddings"]
     image_embeddings = sam.image_encoder(inputs).cpu().numpy()
     print('image_embeddings', image_embeddings.shape)
@@ -148,8 +154,8 @@ def export_sam_model():
 
 def onnx_model_example():
     import os
-    ort_session_embedding = onnxruntime.InferenceSession('vit_l_embedding.onnx',providers=['CPUExecutionProvider'])
-    ort_session_sam = onnxruntime.InferenceSession('sam_onnx_example.onnx',providers=['CPUExecutionProvider'])
+    ort_session_embedding = onnxruntime.InferenceSession('vit_l_embedding_quantized.onnx',providers=['CPUExecutionProvider'])
+    ort_session_sam = onnxruntime.InferenceSession('sam_onnx_example_quantized.onnx',providers=['CPUExecutionProvider'])
 
     image = cv2.imread('notebooks/images/truck.jpg')
     image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
@@ -209,9 +215,17 @@ def onnx_model_example():
     plt.axis('off')
     plt.savefig('demo.png')
 
-def export_engine_image_encoder(f='vit_l_embedding.onnx'):
-    import tensorrt as trt
-    from pathlib import Path
+def onnx_quantize_dynamic(input_model_path, output_model_path):
+    quantize_dynamic(
+        model_input=input_model_path,
+        model_output=output_model_path,
+        optimize_model=True,
+        per_channel=False,
+        reduce_range=False,
+        weight_type=QuantType.QUInt8,
+    )
+
+def export_engine_image_encoder(f='vit_l_embedding.onnx', quantType=trt.BuilderFlag.FP16):
     file = Path(f)
     f = file.with_suffix('.engine')  # TensorRT engine file
     onnx = file.with_suffix('.onnx')
@@ -234,15 +248,17 @@ def export_engine_image_encoder(f='vit_l_embedding.onnx'):
     for out in outputs:
         print(f'output "{out.name}" with shape{out.shape} {out.dtype}')
 
-    half = True
-    print(f'building FP{16 if builder.platform_has_fast_fp16 and half else 32} engine as {f}')
-    if builder.platform_has_fast_fp16 and half:
-        config.set_flag(trt.BuilderFlag.FP16)
+    # half = True
+    # print(f'building FP{16 if builder.platform_has_fast_fp16 and half else 32} engine as {f}')
+    # if builder.platform_has_fast_fp16 and half:
+    #     config.set_flag(trt.BuilderFlag.FP16)
+    config.set_flag(quantType)
+    
     with builder.build_engine(network, config) as engine, open(f, 'wb') as t:
         t.write(engine.serialize())
 
 
-def export_engine_prompt_encoder_and_mask_decoder(f='sam_onnx_example.onnx'):
+def export_engine_prompt_encoder_and_mask_decoder(f='sam_onnx_example.onnx', quantType=trt.BuilderFlag.FP16):
     import tensorrt as trt
     from pathlib import Path
     file = Path(f)
@@ -251,7 +267,7 @@ def export_engine_prompt_encoder_and_mask_decoder(f='sam_onnx_example.onnx'):
     logger = trt.Logger(trt.Logger.INFO)
     builder = trt.Builder(logger)
     config = builder.create_builder_config()
-    workspace = 10
+    workspace = 6
     print("workspace: ", workspace)
     config.max_workspace_size = workspace * 1 << 30
     flag = (1 << int(trt.NetworkDefinitionCreationFlag.EXPLICIT_BATCH))
@@ -277,17 +293,130 @@ def export_engine_prompt_encoder_and_mask_decoder(f='sam_onnx_example.onnx'):
     # profile.set_shape_input('orig_im_size', (2,), (2,), (2, ))
     config.add_optimization_profile(profile)
 
-    half = True
-    print(f'building FP{16 if builder.platform_has_fast_fp16 and half else 32} engine as {f}')
-    if builder.platform_has_fast_fp16 and half:
-        config.set_flag(trt.BuilderFlag.FP16)
+    # half = True
+    # print(f'building FP{16 if builder.platform_has_fast_fp16 and half else 32} engine as {f}')
+    # if builder.platform_has_fast_fp16 and half:
+    #     config.set_flag(trt.BuilderFlag.FP16)
+    config.set_flag(quantType)
     with builder.build_engine(network, config) as engine, open(f, 'wb') as t:
         t.write(engine.serialize())
+
+# copy from ultralytics/yolov5/utils/dataloaders.py and modified part
+class LoadImages:
+    IMG_FORMATS = 'bmp', 'dng', 'jpeg', 'jpg', 'mpo', 'png', 'tif', 'tiff', 'webp', 'pfm'  # include image suffixes
+    VID_FORMATS = 'asf', 'avi', 'gif', 'm4v', 'mkv', 'mov', 'mp4', 'mpeg', 'mpg', 'ts', 'wmv'  # include video suffixes
+    # YOLOv5 image/video dataloader, i.e. `python detect.py --source image.jpg/vid.mp4`
+    def __init__(self, path, img_size=640, stride=32, auto=True, transforms=None, vid_stride=1):
+        if isinstance(path, str) and Path(path).suffix == '.txt':  # *.txt file with img/vid/dir on each line
+            path = Path(path).read_text().rsplit()
+        files = []
+        for p in sorted(path) if isinstance(path, (list, tuple)) else [path]:
+            p = str(Path(p).resolve())
+            if '*' in p:
+                files.extend(sorted(glob.glob(p, recursive=True)))  # glob
+            elif os.path.isdir(p):
+                files.extend(sorted(glob.glob(os.path.join(p, '*.*'))))  # dir
+            elif os.path.isfile(p):
+                files.append(p)  # files
+            else:
+                raise FileNotFoundError(f'{p} does not exist')
+
+        images = [x for x in files if x.split('.')[-1].lower() in self.IMG_FORMATS]
+        videos = [x for x in files if x.split('.')[-1].lower() in self.VID_FORMATS]
+        ni, nv = len(images), len(videos)
+
+        self.img_size = img_size
+        self.stride = stride
+        self.files = images + videos
+        self.nf = ni + nv  # number of files
+        self.video_flag = [False] * ni + [True] * nv
+        self.mode = 'image'
+        self.auto = auto
+        self.transforms = transforms  # optional
+        self.vid_stride = vid_stride  # video frame-rate stride
+        if any(videos):
+            self._new_video(videos[0])  # new video
+        else:
+            self.cap = None
+        assert self.nf > 0, f'No images or videos found in {p}. ' \
+                            f'Supported formats are:\nimages: {self.IMG_FORMATS}\nvideos: {self.VID_FORMATS}'
+
+    def __iter__(self):
+        self.count = 0
+        return self
+
+    def __next__(self):
+        if self.count == self.nf:
+            raise StopIteration
+        path = self.files[self.count]
+
+        if self.video_flag[self.count]:
+            # Read video
+            self.mode = 'video'
+            for _ in range(self.vid_stride):
+                self.cap.grab()
+            ret_val, im0 = self.cap.retrieve()
+            while not ret_val:
+                self.count += 1
+                self.cap.release()
+                if self.count == self.nf:  # last video
+                    raise StopIteration
+                path = self.files[self.count]
+                self._new_video(path)
+                ret_val, im0 = self.cap.read()
+
+            self.frame += 1
+            # im0 = self._cv2_rotate(im0)  # for use if cv2 autorotation is False
+            s = f'video {self.count + 1}/{self.nf} ({self.frame}/{self.frames}) {path}: '
+
+        else:
+            # Read image
+            self.count += 1
+            im0 = cv2.imread(path)  # BGR
+            assert im0 is not None, f'Image Not Found {path}'
+            s = f'image {self.count}/{self.nf} {path}: '
+
+        if self.transforms:
+            im = self.transforms(im0)  # transforms
+        else:
+            image = cv2.cvtColor(im0, cv2.COLOR_BGR2RGB)
+            pixel_mean=[123.675, 116.28, 103.53],
+            pixel_std=[58.395, 57.12, 57.375]
+            pixel_mean = torch.Tensor(pixel_mean).view(-1, 1, 1)
+            pixel_std = torch.Tensor(pixel_std).view(-1, 1, 1)
+            device = 'cpu'
+            im = pre_processing(image, self.img_size, device,pixel_mean,pixel_std,self.img_size)
+
+        return path, im, im0, self.cap, s
+
+    def _new_video(self, path):
+        # Create a new video capture object
+        self.frame = 0
+        self.cap = cv2.VideoCapture(path)
+        self.frames = int(self.cap.get(cv2.CAP_PROP_FRAME_COUNT) / self.vid_stride)
+        self.orientation = int(self.cap.get(cv2.CAP_PROP_ORIENTATION_META))  # rotation degrees
+        # self.cap.set(cv2.CAP_PROP_ORIENTATION_AUTO, 0)  # disable https://github.com/ultralytics/yolov5/issues/8493
+
+    def _cv2_rotate(self, im):
+        # Rotate a cv2 video manually
+        if self.orientation == 0:
+            return cv2.rotate(im, cv2.ROTATE_90_CLOCKWISE)
+        elif self.orientation == 180:
+            return cv2.rotate(im, cv2.ROTATE_90_COUNTERCLOCKWISE)
+        elif self.orientation == 90:
+            return cv2.rotate(im, cv2.ROTATE_180)
+        return im
+
+    def __len__(self):
+        return self.nf  # number of files
+
 
 if __name__ == '__main__':
     with torch.no_grad():
         export_embedding_model()
         export_sam_model()
+        # onnx_quantize_dynamic('vit_l_embedding.onnx','vit_l_embedding_quantized.onnx')
+        # onnx_quantize_dynamic('sam_onnx_example.onnx','sam_onnx_example_quantized.onnx')
         onnx_model_example()
         export_engine_image_encoder()
         export_engine_prompt_encoder_and_mask_decoder()
