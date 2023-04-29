@@ -412,3 +412,22 @@ def export_engine_prompt_encoder_and_mask_decoder(f='sam_onnx_example.onnx'):
 with torch.no_grad():
     export_engine_image_encoder('sam_onnx_example.onnx')
 ```
+# TensorRT Inferring
+- export 2 engine model
+- open main.cpp change actions(show window or generate file including embeddings features) by define variables[SAMPROMPTENCODERANDMASKDECODER or EMBEDDING]
+
+## Preprocess
+image about resizing,padding,normalization.
+```
+```
+## Postprocess
+generated mask about processing, plot.
+```
+```
+## build
+```
+mkdir build && cd build
+# modify main.cpp 
+cmake ..
+make -j10
+```
