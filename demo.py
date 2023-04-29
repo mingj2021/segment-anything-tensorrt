@@ -225,7 +225,7 @@ def onnx_quantize_dynamic(input_model_path, output_model_path):
         weight_type=QuantType.QUInt8,
     )
 
-def export_engine_image_encoder(f='vit_l_embedding.onnx', quantType=trt.BuilderFlag.FP16):
+def export_engine_image_encoder(f='vit_l_embedding.onnx', half=True):
     file = Path(f)
     f = file.with_suffix('.engine')  # TensorRT engine file
     onnx = file.with_suffix('.onnx')
@@ -248,17 +248,16 @@ def export_engine_image_encoder(f='vit_l_embedding.onnx', quantType=trt.BuilderF
     for out in outputs:
         print(f'output "{out.name}" with shape{out.shape} {out.dtype}')
 
-    # half = True
-    # print(f'building FP{16 if builder.platform_has_fast_fp16 and half else 32} engine as {f}')
-    # if builder.platform_has_fast_fp16 and half:
-    #     config.set_flag(trt.BuilderFlag.FP16)
-    config.set_flag(quantType)
+    print(f'building FP{16 if builder.platform_has_fast_fp16 and half else 32} engine as {f}')
+    if builder.platform_has_fast_fp16 and half:
+        config.set_flag(trt.BuilderFlag.FP16)
+    # config.set_flag(quantType)
     
     with builder.build_engine(network, config) as engine, open(f, 'wb') as t:
         t.write(engine.serialize())
 
 
-def export_engine_prompt_encoder_and_mask_decoder(f='sam_onnx_example.onnx', quantType=trt.BuilderFlag.FP16):
+def export_engine_prompt_encoder_and_mask_decoder(f='sam_onnx_example.onnx', half=True):
     import tensorrt as trt
     from pathlib import Path
     file = Path(f)
@@ -293,11 +292,9 @@ def export_engine_prompt_encoder_and_mask_decoder(f='sam_onnx_example.onnx', qua
     # profile.set_shape_input('orig_im_size', (2,), (2,), (2, ))
     config.add_optimization_profile(profile)
 
-    # half = True
-    # print(f'building FP{16 if builder.platform_has_fast_fp16 and half else 32} engine as {f}')
-    # if builder.platform_has_fast_fp16 and half:
-    #     config.set_flag(trt.BuilderFlag.FP16)
-    config.set_flag(quantType)
+    print(f'building FP{16 if builder.platform_has_fast_fp16 and half else 32} engine as {f}')
+    if builder.platform_has_fast_fp16 and half:
+        config.set_flag(trt.BuilderFlag.FP16)
     with builder.build_engine(network, config) as engine, open(f, 'wb') as t:
         t.write(engine.serialize())
 
@@ -413,10 +410,8 @@ class LoadImages:
 
 if __name__ == '__main__':
     with torch.no_grad():
-        export_embedding_model()
-        export_sam_model()
-        # onnx_quantize_dynamic('vit_l_embedding.onnx','vit_l_embedding_quantized.onnx')
-        # onnx_quantize_dynamic('sam_onnx_example.onnx','sam_onnx_example_quantized.onnx')
-        onnx_model_example()
-        export_engine_image_encoder()
+        # export_embedding_model()
+        # export_sam_model()
+        # onnx_model_example()
+        # export_engine_image_encoder()
         export_engine_prompt_encoder_and_mask_decoder()

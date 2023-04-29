@@ -80,6 +80,7 @@ public:
     ~ResizeLongestSide();
 
     at::IntArrayRef get_preprocess_shape(int oldh, int oldw);
+    void get_preprocess_shape(int oldh, int oldw,int &newh, int &neww);
     at::Tensor apply_coords(at::Tensor boxes, at::IntArrayRef sz);
 
 public:
@@ -97,16 +98,24 @@ ResizeLongestSide::~ResizeLongestSide()
 at::IntArrayRef ResizeLongestSide::get_preprocess_shape(int oldh, int oldw)
 {
     float scale = m_target_length * 1.0 / std::max(oldh, oldw);
-    int newh = static_cast<int>(oldh * scale + 0.5);
-    int neww = static_cast<int>(oldw * scale + 0.5);
-    return at::IntArrayRef{newh, neww};
+    const int newh = static_cast<int>(oldh * scale + 0.5);
+    const int neww = static_cast<int>(oldw * scale + 0.5);
+    return  at::IntArrayRef{newh, neww};
+}
+
+void ResizeLongestSide::get_preprocess_shape(int oldh, int oldw,int &newh, int &neww)
+{
+    float scale = m_target_length * 1.0 / std::max(oldh, oldw);
+    newh = static_cast<int>(oldh * scale + 0.5);
+    neww = static_cast<int>(oldw * scale + 0.5);
 }
 
 at::Tensor ResizeLongestSide::apply_coords(at::Tensor coords, at::IntArrayRef sz)
 {
     int old_h = sz[0], old_w = sz[1];
-    auto new_sz = get_preprocess_shape(old_h, old_w);
-    int new_h = new_sz[0], new_w = new_sz[1];
+    int new_h , new_w ;
+    get_preprocess_shape(old_h, old_w,new_h,new_w);
+    
     coords.index_put_({"...", 0}, coords.index({"...", 0}) * (1.0 * new_w / old_w));
     coords.index_put_({"...", 1}, coords.index({"...", 1}) * (1.0 * new_h / old_h));
     return coords;
@@ -159,9 +168,9 @@ SamEmbedding::SamEmbedding(const std::string &bufferName, std::shared_ptr<nvinfe
         auto dims = mEngine->getBindingDimensions(i);
         auto tensor_name = mEngine->getBindingName(i);
         std::cout << "tensor_name: " << tensor_name << std::endl;
-        // dims2str(dims);
+        dims2str(dims);
         nvinfer1::DataType type = mEngine->getBindingDataType(i);
-        // index2srt(type);
+        index2srt(type);
         int vecDim = mEngine->getBindingVectorizedDim(i);
         // std::cout << "vecDim:" << vecDim << std::endl;
         if (-1 != vecDim) // i.e., 0 != lgScalarsPerVector
@@ -192,10 +201,10 @@ int SamEmbedding::prepareInput()
     auto pixel_mean = at::tensor({123.675, 116.28, 103.53}, torch::kFloat).view({-1, 1, 1});
     auto pixel_std = at::tensor({58.395, 57.12, 57.375}, torch::kFloat).view({-1, 1, 1});
     ResizeLongestSide transf(image_size);
-    auto target_size = transf.get_preprocess_shape(frame.rows, frame.cols);
-
+    int newh,neww;
+    transf.get_preprocess_shape(frame.rows, frame.cols,newh,neww);
     cv::Mat im_sz;
-    cv::resize(frame, im_sz, cv::Size(target_size[1], target_size[0]));
+    cv::resize(frame, im_sz, cv::Size(neww, newh));
     im_sz.convertTo(im_sz, CV_32F, 1.0);
     at::Tensor input_image_torch =
         at::from_blob(im_sz.data, {im_sz.rows, im_sz.cols, im_sz.channels()})
@@ -329,7 +338,7 @@ int SamPromptEncoderAndMaskDecoder::prepareInput(int x, int y)
     int image_size = 1024;
     ResizeLongestSide transf(image_size);
 
-    auto input_point = at::tensor({x, y,x+50, y+50}, at::kFloat).reshape({-1,2});
+    auto input_point = at::tensor({x, y}, at::kFloat).reshape({-1,2});
     auto input_label = at::tensor({1}, at::kFloat);
 
     auto trt_coord = at::concatenate({input_point, at::tensor({0, 0}, at::kFloat).unsqueeze(0)}, 0).unsqueeze(0);
@@ -393,15 +402,16 @@ int SamPromptEncoderAndMaskDecoder::verifyOutput()
     masks = F::interpolate(masks, F::InterpolateFuncOptions().size(std::vector<int64_t>({longest_side, longest_side})).mode(torch::kBilinear).align_corners(false));
     // at::IntArrayRef input_image_size{frame.rows, frame.cols};
     ResizeLongestSide transf(longest_side);
-    auto target_size = transf.get_preprocess_shape(frame.rows, frame.cols);
-    masks = masks.index({"...", Slice(None, target_size[0]), Slice(None, target_size[1])});
+    int newh,neww;
+    transf.get_preprocess_shape(frame.rows, frame.cols,newh,neww);
+    masks = masks.index({"...", Slice(None, newh), Slice(None, neww)});
 
     masks = F::interpolate(masks, F::InterpolateFuncOptions().size(std::vector<int64_t>({frame.rows, frame.cols})).mode(torch::kBilinear).align_corners(false));
     std::cout << "masks: " << masks.sizes() << std::endl;
 
     at::Tensor iou_predictions;
     iou_predictions = at::zeros({dim0.d[0], dim0.d[1]}, at::kFloat);
-    mInOut["iou_predictions"]->device2host((void *)(iou_predictions.data_ptr<float>()), stream);
+    mInOut["scores"]->device2host((void *)(iou_predictions.data_ptr<float>()), stream);
     // Wait for the work in the stream to complete
     CHECK(cudaStreamSynchronize(stream));
 
@@ -548,9 +558,10 @@ void locator(int event, int x, int y, int flags, void *userdata)
 #define SAMPROMPTENCODERANDMASKDECODER
 int main(int argc, char const *argv[])
 {
+    std::cout << at::IntArrayRef{1,2} << std::endl;
 
 #ifdef EMBEDDING
-    const std::string modelFile = "D:/projects/detections/data/vit_l_embedding.engine";
+    const std::string modelFile = "/workspace/segment-anything-tensorrt/segment-anything/vit_l_embedding.engine";
     std::ifstream engineFile(modelFile.c_str(), std::ifstream::binary);
     assert(engineFile);
     // if (!engineFile)
@@ -571,7 +582,8 @@ int main(int argc, char const *argv[])
 
     std::unique_ptr<nvinfer1::IRuntime> runtime(nvinfer1::createInferRuntime(logger));
     std::shared_ptr<nvinfer1::ICudaEngine> mEngine(runtime->deserializeCudaEngine(engineData.data(), fsize, nullptr));
-    cv::Mat frame = cv::imread("D:/projects/detections/data/6.png");
+    cv::Mat frame = cv::imread("/workspace/segment-anything-tensorrt/segment-anything/notebooks/images/truck.jpg");
+    std::cout << frame.size() << std::endl;
     std::shared_ptr<SamEmbedding> b(new SamEmbedding(std::to_string(1), mEngine, frame));
     auto res = b->prepareInput();
     std::cout << "------------------prepareInput: " << res << std::endl;
@@ -582,7 +594,7 @@ int main(int argc, char const *argv[])
 #endif
 
 #ifdef SAMPROMPTENCODERANDMASKDECODER
-    const std::string modelFile = "D:/projects/detections/data/sam_onnx_example.engine";
+    const std::string modelFile = "/workspace/segment-anything-tensorrt/segment-anything/sam_onnx_example.engine";
     std::ifstream engineFile(modelFile.c_str(), std::ifstream::binary);
     assert(engineFile);
     // if (!engineFile)
@@ -603,7 +615,7 @@ int main(int argc, char const *argv[])
 
     std::unique_ptr<nvinfer1::IRuntime> runtime(nvinfer1::createInferRuntime(logger));
     std::shared_ptr<nvinfer1::ICudaEngine> mEngine(runtime->deserializeCudaEngine(engineData.data(), fsize, nullptr));
-    cv::Mat frame = cv::imread("D:/projects/detections/data/6.png");
+    cv::Mat frame = cv::imread("/workspace/segment-anything-tensorrt/segment-anything/notebooks/images/truck.jpg");
     b = std::shared_ptr<SamPromptEncoderAndMaskDecoder>(new SamPromptEncoderAndMaskDecoder(std::to_string(1), mEngine, frame));
     //  Mat image = imread("D:/projects/detections/data/2.png");//loading image in the matrix//
     namedWindow("img_", 0);                  // declaring window to show image//

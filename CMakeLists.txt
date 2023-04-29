@@ -1,8 +1,12 @@
 cmake_minimum_required(VERSION 3.14.0 FATAL_ERROR)
 project(Detections)
 
+# add_compile_options(-fno-elide-constructors)
+# set(CMAKE_CXX_FLAGS "-fno-elide-constructors ${CMAKE_CXX_FLAGS}")
 # set(ROOT_DIRS "C:/Users/77274/projects")
 # set(ROOT_DIRS "D:/projects")
+# set( CMAKE_CXX_COMPILER /usr/bin/g++ )
+# set(CMAKE_CXX_FLAGS "-fno-elide-constructors ${CMAKE_CXX_FLAGS}")
 set(Torch_DIR "/usr/local/libtorch/share/cmake/Torch")
 find_package(Torch REQUIRED)
 # include_directories(${TORCH_INCLUDE_DIRS}) # Not needed for CMake >= 2.8.11
