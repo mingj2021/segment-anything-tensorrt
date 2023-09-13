@@ -1,5 +1,5 @@
 # Overview
-[中文-windows](README_zh_CN.md)
+[中文-windows](README_zh_windows.md)
 <p float="left">
   <img src="truck.gif?raw=true" width="100%" />
 </p>
