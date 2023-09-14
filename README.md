@@ -5,4 +5,5 @@
 </p>
 
 download [translated onnx model](https://drive.google.com/drive/folders/1xZ7XpyKGx0Fg-t81SLND56vC2TEQ4otN?usp=sharing)
-# If you test successfully, please give me feedback.
+# tutorials
+tutorials.ipynb 
