@@ -33,11 +33,11 @@ void export_engine_image_encoder(std::string f="vit_l_embedding.onnx")
     std::unique_ptr<nvinfer1::IBuilderConfig> config(builder->createBuilderConfig());
 
     // maximum workspace size
-    // int workspace = 8;  // GB
+    // int workspace = 4;  // GB
     // config->setMaxWorkspaceSize(workspace * 1U << 30);
     config->setFlag(BuilderFlag::kGPU_FALLBACK);
 
-    // config->setFlag(BuilderFlag::kFP16);
+    config->setFlag(BuilderFlag::kFP16);
 
     // create an engine
     // auto serializedModel = std::make_unique<nvinfer1::IHostMemory>(builder->buildSerializedNetwork(*network, *config));
@@ -78,7 +78,7 @@ void export_engine_prompt_encoder_and_mask_decoder(std::string f="sam_onnx_examp
     // config->setMaxWorkspaceSize(workspace * 1U << 30);
     config->setFlag(BuilderFlag::kGPU_FALLBACK);
 
-    // config->setFlag(BuilderFlag::kFP16);
+    config->setFlag(BuilderFlag::kFP16);
 
     nvinfer1::IOptimizationProfile* profile = builder->createOptimizationProfile();
     // profile->setDimensions("image_embeddings", nvinfer1::OptProfileSelector::kMIN, {1, 256, 64, 64 });
