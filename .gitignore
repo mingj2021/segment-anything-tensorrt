@@ -33,6 +33,4 @@
 
 build
 segment-anything
-.vscode
-
-data
+data/*.onnx

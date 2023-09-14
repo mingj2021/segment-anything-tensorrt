@@ -4,7 +4,7 @@
 #include "buffers.h"
 #include <opencv2/opencv.hpp>
 #include <algorithm>
-#include <torchvision/vision.h>
+// #include <torchvision/vision.h>
 #include <torch/script.h>
 #include "sam_utils.h"
 
