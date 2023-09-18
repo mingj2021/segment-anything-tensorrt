@@ -6,7 +6,7 @@
 #include "sam_utils.h"
 
 
-void export_engine_image_encoder(std::string f="vit_l_embedding.onnx")
+void export_engine_image_encoder(std::string f="vit_l_embedding.onnx",std::string output="vit_l_embedding.engine")
 {
     // create an instance of the builder
     std::unique_ptr<nvinfer1::IBuilder> builder(createInferBuilder(logger));
@@ -43,11 +43,11 @@ void export_engine_image_encoder(std::string f="vit_l_embedding.onnx")
     // auto serializedModel = std::make_unique<nvinfer1::IHostMemory>(builder->buildSerializedNetwork(*network, *config));
      std::unique_ptr<nvinfer1::IHostMemory> serializedModel(builder->buildSerializedNetwork(*network, *config));
      std::cout << "serializedModel->size()" << serializedModel->size() << std::endl;
-     std::ofstream outfile("vit_l_embedding.engine", std::ofstream::out | std::ofstream::binary);
+     std::ofstream outfile(output, std::ofstream::out | std::ofstream::binary);
      outfile.write((char*)serializedModel->data(), serializedModel->size());
 }
 
-void export_engine_prompt_encoder_and_mask_decoder(std::string f="sam_onnx_example.onnx")
+void export_engine_prompt_encoder_and_mask_decoder(std::string f="sam_onnx_example.onnx",std::string output="sam_onnx_example.engine")
 {
     // create an instance of the builder
     std::unique_ptr<nvinfer1::IBuilder> builder(createInferBuilder(logger));
@@ -107,7 +107,7 @@ void export_engine_prompt_encoder_and_mask_decoder(std::string f="sam_onnx_examp
     // auto serializedModel = std::make_unique<nvinfer1::IHostMemory>(builder->buildSerializedNetwork(*network, *config));
      std::unique_ptr<nvinfer1::IHostMemory> serializedModel(builder->buildSerializedNetwork(*network, *config));
      std::cout << "serializedModel->size()" << serializedModel->size() << std::endl;
-     std::ofstream outfile("sam_onnx_example.engine", std::ofstream::out | std::ofstream::binary);
+     std::ofstream outfile(output, std::ofstream::out | std::ofstream::binary);
      outfile.write((char*)serializedModel->data(), serializedModel->size());
 }
 #endif

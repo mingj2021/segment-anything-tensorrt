@@ -62,6 +62,7 @@ public:
     int prepareInput();
     bool infer();
     at::Tensor verifyOutput();
+    at::Tensor verifyOutput(std::string output_name);
 
 public:
     std::shared_ptr<nvinfer1::ICudaEngine> mEngine;
@@ -184,7 +185,137 @@ at::Tensor SamEmbedding::verifyOutput()
     return preds;
 }
 
+at::Tensor SamEmbedding::verifyOutput(std::string output_name)
+{
+    float ms{0.0f};
+    CHECK(cudaEventRecord(end, stream));
+    CHECK(cudaEventSynchronize(end));
+    CHECK(cudaEventElapsedTime(&ms, start, end));
+
+    auto dim0 = mEngine->getTensorShape(output_name.c_str());
+
+    // dims2str(dim0);
+    // dims2str(dim1);
+    at::Tensor preds;
+    preds = at::zeros({dim0.d[0], dim0.d[1], dim0.d[2], dim0.d[3]}, at::kFloat);
+    mInOut[output_name]->device2host((void *)(preds.data_ptr<float>()), stream);
+
+    // Wait for the work in the stream to complete
+    CHECK(cudaStreamSynchronize(stream));
+    // torch::save({preds}, "preds.pt");
+    // cv::FileStorage storage("1.yaml", cv::FileStorage::WRITE);
+    // storage << "image_embeddings" << points3dmatrix;
+    return preds;
+}
+
 ///////////////////////////////////////////////////
+
+class SamEmbedding2
+{
+public:
+    SamEmbedding2(std::string bufferName, std::shared_ptr<nvinfer1::ICudaEngine> &engine);
+    ~SamEmbedding2();
+
+    int prepareInput(at::Tensor input_image_torch);
+    bool infer();
+    at::Tensor verifyOutput();
+
+public:
+    std::shared_ptr<nvinfer1::ICudaEngine> mEngine;
+    std::unique_ptr<nvinfer1::IExecutionContext> context;
+
+    cudaStream_t stream;
+    cudaEvent_t start, end;
+
+    std::vector<void *> mDeviceBindings;
+    std::map<std::string, std::unique_ptr<algorithms::DeviceBuffer>> mInOut;
+    std::vector<float> pad_info;
+    std::vector<std::string> names;
+    std::string mBufferName;
+};
+
+SamEmbedding2::SamEmbedding2(std::string bufferName, std::shared_ptr<nvinfer1::ICudaEngine> &engine) : 
+mBufferName(bufferName), mEngine(engine)
+{
+    context = std::unique_ptr<nvinfer1::IExecutionContext>(mEngine->createExecutionContext());
+    if (!context)
+    {
+        std::cerr << "create context error" << std::endl;
+    }
+
+    CHECK(cudaStreamCreate(&stream));
+    CHECK(cudaEventCreateWithFlags(&start, cudaEventBlockingSync));
+    CHECK(cudaEventCreateWithFlags(&end, cudaEventBlockingSync));
+
+    for (int i = 0; i < mEngine->getNbBindings(); i++)
+    {
+        auto dims = mEngine->getBindingDimensions(i);
+        auto tensor_name = mEngine->getBindingName(i);
+        std::cout << "tensor_name: " << tensor_name << std::endl;
+        // dims2str(dims);
+        nvinfer1::DataType type = mEngine->getBindingDataType(i);
+        // index2srt(type);
+        int vecDim = mEngine->getBindingVectorizedDim(i);
+        // std::cout << "vecDim:" << vecDim << std::endl;
+        if (-1 != vecDim) // i.e., 0 != lgScalarsPerVector
+        {
+            int scalarsPerVec = mEngine->getBindingComponentsPerElement(i);
+            std::cout << "scalarsPerVec" << scalarsPerVec << std::endl;
+        }
+        auto vol = std::accumulate(dims.d, dims.d + dims.nbDims, int64_t{1}, std::multiplies<int64_t>{});
+        std::unique_ptr<algorithms::DeviceBuffer> device_buffer{new algorithms::DeviceBuffer(vol, type)};
+        mDeviceBindings.emplace_back(device_buffer->data());
+        mInOut[tensor_name] = std::move(device_buffer);
+    }
+}
+
+SamEmbedding2::~SamEmbedding2()
+{
+    CHECK(cudaEventDestroy(start));
+    CHECK(cudaEventDestroy(end));
+    CHECK(cudaStreamDestroy(stream));
+}
+
+int SamEmbedding2::prepareInput(at::Tensor input_image_torch)
+{
+    auto ret = mInOut["image_embeddings_part_1"]->host2device((void *)(input_image_torch.data_ptr<float>()), false, stream);
+    return ret;
+}
+
+bool SamEmbedding2::infer()
+{
+    CHECK(cudaEventRecord(start, stream));
+    auto ret = context->enqueueV2(mDeviceBindings.data(), stream, nullptr);
+    return ret;
+}
+
+at::Tensor SamEmbedding2::verifyOutput()
+{
+    float ms{0.0f};
+    CHECK(cudaEventRecord(end, stream));
+    CHECK(cudaEventSynchronize(end));
+    CHECK(cudaEventElapsedTime(&ms, start, end));
+
+    auto dim0 = mEngine->getTensorShape("image_embeddings_part_2");
+
+    // dims2str(dim0);
+    // dims2str(dim1);
+    at::Tensor preds;
+    preds = at::zeros({dim0.d[0], dim0.d[1], dim0.d[2], dim0.d[3]}, at::kFloat);
+    mInOut["image_embeddings_part_2"]->device2host((void *)(preds.data_ptr<float>()), stream);
+
+    // Wait for the work in the stream to complete
+    CHECK(cudaStreamSynchronize(stream));
+    // torch::save({preds}, "preds.pt");
+    // cv::FileStorage storage("1.yaml", cv::FileStorage::WRITE);
+    // storage << "image_embeddings" << points3dmatrix;
+    return preds;
+}
+
+///////////////////////////////////////////////////
+
+
+
 class SamPromptEncoderAndMaskDecoder
 {
 public:
@@ -495,8 +626,7 @@ int SamPromptEncoderAndMaskDecoder::verifyOutput()
     std::cout << "1111111111111111" << std::endl;
     cv::cvtColor(img_, img_, cv::COLOR_RGB2BGR);
     cv::imwrite("img1111.jpg",img_);
-    // cv::namedWindow("img_", 0);
-    // cv::imshow("img_", img_);
+    cv::imshow("img_", img_);
     // cv::waitKey();
     return 0;
 }

@@ -35,7 +35,14 @@ target_link_libraries(${TARGET_NAME} ${TORCH_LIBRARIES})
 target_link_libraries(${TARGET_NAME} ${OpenCV_LIBS})
 # target_link_libraries(${TARGET_NAME} TorchVision::TorchVision)
 target_link_libraries(${TARGET_NAME} ${SAMPLE_DEP_LIBS})
-
-
 set_property(TARGET ${TARGET_NAME} PROPERTY CXX_STANDARD 17)
 
+
+set(SAMPLE_SOURCES main_vim_h.cpp)
+set(TARGET_NAME sampleSAM2)
+add_executable(${TARGET_NAME} ${SAMPLE_SOURCES})
+target_link_libraries(${TARGET_NAME} ${TORCH_LIBRARIES})
+target_link_libraries(${TARGET_NAME} ${OpenCV_LIBS})
+# target_link_libraries(${TARGET_NAME} TorchVision::TorchVision)
+target_link_libraries(${TARGET_NAME} ${SAMPLE_DEP_LIBS})
+set_property(TARGET ${TARGET_NAME} PROPERTY CXX_STANDARD 17)
