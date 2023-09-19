@@ -1,5 +1,6 @@
 #include "sam.h"
 #include "export.h"
+#include "baseModel.h"
 ///////////////////////////////////////////////////////////////////////////////
 using namespace std;
 using namespace cv;
@@ -42,6 +43,8 @@ void locator(int event, int x, int y, int flags, void *userdata)
 #define SAMPROMPTENCODERANDMASKDECODER
 int main(int argc, char const *argv[])
 {
+    // BaseModel tmp_model("vit_h_embedding_part_1.engine");
+
     ifstream f1("vit_h_embedding_part_1.engine");
     if (!f1.good())
         export_engine_image_encoder("/workspace/segment-anything-tensorrt/data/vit_h_part_1_embedding.onnx", "vit_h_embedding_part_1.engine");
@@ -148,18 +151,18 @@ int main(int argc, char const *argv[])
         std::shared_ptr<nvinfer1::ICudaEngine> mEngine(runtime->deserializeCudaEngine(engineData.data(), fsize, nullptr));
         cv::Mat frame = cv::imread("/workspace/segment-anything-tensorrt/data/truck.jpg");
         eng_1 = std::shared_ptr<SamPromptEncoderAndMaskDecoder>(new SamPromptEncoderAndMaskDecoder(std::to_string(1), mEngine, frame));
-        namedWindow("img_", 0);                  // declaring window to show image//
-        setMouseCallback("img_", locator, NULL); // Mouse callback function on define window//
-        imshow("img_", frame);                   // showing image on the window//
-        waitKey(0);                              // wait for keystroke//
+        // namedWindow("img_", 0);                  // declaring window to show image//
+        // setMouseCallback("img_", locator, NULL); // Mouse callback function on define window//
+        // imshow("img_", frame);                   // showing image on the window//
+        // waitKey(0);                              // wait for keystroke//
 
-        // auto res = eng_1->prepareInput(576, 400, image_embeddings);
+        auto res = eng_1->prepareInput(760, 373, image_embeddings);
         // // std::vector<int> mult_pts = {x,y,x-5,y-5,x+5,y+5};
         // // auto res = eng_1->prepareInput(mult_pts, image_embeddings);
         // std::cout << "------------------prepareInput: " << res << std::endl;
-        // res = eng_1->infer();
+        res = eng_1->infer();
         // std::cout << "------------------infer: " << res << std::endl;
-        // eng_1->verifyOutput();
+        eng_1->verifyOutput();
         // std::cout << "-----------------done" << std::endl;
     }
 #endif

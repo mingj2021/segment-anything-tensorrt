@@ -6,7 +6,12 @@
 
 download [translated onnx model](https://drive.google.com/drive/folders/1xZ7XpyKGx0Fg-t81SLND56vC2TEQ4otN?usp=sharing)
 # tutorials
+```
+vim_h trt model tested on GPU 3060 Ti, tests ok.
 tutorials.ipynb 
+tutorials_vim_h.ipynb
+
+```
 
 # how to export vim_h model
 how_to_export_vim_h_model.ipynb

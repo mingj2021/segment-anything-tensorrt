@@ -626,8 +626,7 @@ int SamPromptEncoderAndMaskDecoder::verifyOutput()
     std::cout << "1111111111111111" << std::endl;
     cv::cvtColor(img_, img_, cv::COLOR_RGB2BGR);
     cv::imwrite("img1111.jpg",img_);
-    cv::imshow("img_", img_);
-    // cv::waitKey();
+    // cv::imshow("img_", img_);
     return 0;
 }
 
